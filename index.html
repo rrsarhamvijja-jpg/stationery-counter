@@ -76,6 +76,7 @@
                 <input id="login-email" type="email" placeholder="Email">
                 <input id="login-pass" type="password" placeholder="Password">
                 <button class="b" id="btn-login">Enter System</button>
+                <button class="g" id="btn-public-lookup" style="margin-top:10px; border-color:var(--acc); color:var(--acc); font-weight:600">Student Self-Service Portal</button>
             </div>
             <div id="login-err" class="warn" style="margin-top:15px"></div>
         </div>
@@ -148,6 +149,13 @@
         };
 
         $('#btn-logout').onclick = () => signOut(auth).then(() => location.reload());
+
+        $('#btn-public-lookup').onclick = () => {
+            $('#login-screen').style.display = 'none';
+            $('#main').style.display = 'block';
+            tab = 'lookup';
+            render();
+        };
 
         function setupNav() {
             const nav = $('#main-nav');
