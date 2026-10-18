@@ -95,7 +95,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, onSnapshot, query, where, addDoc, runTransaction, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, onSnapshot, query, where, addDoc, runTransaction, writeBatch, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyD5UWcdWvhlKLWAk5peDXN2GrX8miBIKYk",
@@ -493,9 +493,84 @@
 
         /* --- REPORTS --- */
         async function rRep() {
-            $('#main').innerHTML = `<div class="card"><h2>Cloud Reports</h2><p>Loading sales data from Firestore...<br><br>Reports are read-only for staff.</p></div>`;
-            // In a full implementation, we use getDocs(query(collection(db, 'bills')))
-            say('Reports are read-only for staff');
+            $('#main').innerHTML = `<div class="card"><h2>Cloud Reports</h2><p>Loading sales data from Firestore...</p></div>`;
+
+            try {
+                const billsSnap = await getFirestoreQuery('bills');
+                const bills = billsSnap.map(b => b.data());
+
+                const today = new Date().toISOString().split('T')[0];
+                const totalSales = bills.reduce((sum, b) => sum + (b.total || 0), 0);
+                const todaySales = bills.filter(b => b.date && b.date.startsWith(today)).reduce((sum, b) => sum + (b.total || 0), 0);
+
+                const itemSales = {};
+                bills.forEach(b => {
+                    (b.items || []).forEach(i => {
+                        itemSales[i.name] = (itemSales[i.name] || 0) + (i.qty || 0);
+                    });
+                });
+
+                const lowStock = items.filter(i => i.stock <= 5 && i.type !== 'service');
+
+                $('#main').innerHTML = `
+                    <div class="grid">
+                        <div class="card">
+                            <h2><span style="color:var(--acc)">●</span> Sales Summary</h2>
+                            <div class="tot-box">
+                                <span class="tot-label">Total Revenue</span>
+                                <div class="tot-val">${inr(totalSales)}</div>
+                            </div>
+                            <div class="tot-box" style="background: #fff; border: 1px solid var(--line)">
+                                <span class="tot-label">Today's Revenue</span>
+                                <div class="tot-val" style="color: var(--ok)">${inr(todaySales)}</div>
+                            </div>
+                            <div class="row">
+                                <div class="card" style="flex:1; text-align:center">
+                                    <small>Total Bills</small>
+                                    <div style="font-size:20px; font-weight:bold">${bills.length}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h2><span style="color:var(--acc)">●</span> Item Velocity</h2>
+                            <div class="scroll">
+                                <table>
+                                    <thead><tr><th>Item</th><th class="n">Sold Qty</th></tr></thead>
+                                    <tbody>${Object.entries(itemSales).map(([name, qty]) => `
+                                        <tr><td>${esc(name)}</td><td class="n">${qty}</td></tr>
+                                    `).join('') || '<tr><td colspan="2" class="mut">No sales yet</td></tr>'}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid">
+                        <div class="card">
+                            <h2><span style="color:var(--bad)">●</span> Low Stock Alert (<= 5)</h2>
+                            <div class="scroll">
+                                <table>
+                                    <thead><tr><th>Item</th><th class="n">Stock</th></tr></thead>
+                                    <tbody>${lowStock.map(i => `
+                                        <tr class="warn"><td>${esc(i.name)}</td><td class="n">${i.stock}</td></tr>
+                                    `).join('') || '<tr><td colspan="2" class="mut">All stock levels healthy</td></tr>'}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h2><span style="color:var(--acc)">●</span> System Status</h2>
+                            <p>Role: <span class="ok">${userRole.toUpperCase()}</span></p>
+                            <p>Synced Items: ${items.length}</p>
+                            <p>Total Transactions: ${bills.length}</p>
+                        </div>
+                    </div>`;
+            } catch (e) {
+                $('#main').innerHTML = `<div class="card"><h2>Error</h2><p>${e.message}</p></div>`;
+            }
+        }
+
+        // Helper for fetching collections
+        async function getFirestoreQuery(colName) {
+            const snap = await getDocs(collection(db, colName));
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
         /* --- STUDENT HISTORY --- */
