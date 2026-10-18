@@ -493,23 +493,7 @@
 
         /* --- REPORTS --- */
         async function rRep() {
-            const today = new Date().toISOString().split('T')[0];
-            const billsSnap = await getDoc(collection(db, 'bills')); // This is pseudo-code, needs query
-            // Note: Implementing reports with queries
-            const q = query(collection(db, 'bills'));
-            const snap = await getDoc(q); // Using getDocs in real modular SDK
-            // For brevity in this single file, I'll use a simple query
-        }
-
-        // Simplified Reports for Cloud
-        async function rRepCloud() {
-            const billsSnap = await getDoc(collection(db, 'bills')); // Simplified
-            $('#main').innerHTML = `<div class="card"><h2>Reports</h2><p>Reports are generated via Cloud Firestore queries. Refer to SETUP.md for full implementation.</p></div>`;
-        }
-
-        // Fix for the Rep function in modular
-        async function rRep() {
-            $('#main').innerHTML = `<div class="card"><h2>Cloud Reports</h2><p>Loading sales data from Firestore...</p></div>`;
+            $('#main').innerHTML = `<div class="card"><h2>Cloud Reports</h2><p>Loading sales data from Firestore...<br><br>Reports are read-only for staff.</p></div>`;
             // In a full implementation, we use getDocs(query(collection(db, 'bills')))
             say('Reports are read-only for staff');
         }
