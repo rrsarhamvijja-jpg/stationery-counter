@@ -171,13 +171,6 @@
         }
 
         // --- DATA SYNC ---
-        // Attach global functions for HTML onclick handlers
-        window.addCart = addCart;
-        window.updateQty = updateQty;
-        window.remCart = remCart;
-        window.adjStock = adjStock;
-        window.delItem = delItem;
-
         function syncItems() {
             onSnapshot(collection(db, 'items'), (snap) => {
                 items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -345,229 +338,7 @@
         function remCart(idx) {
             cart.items.splice(idx, 1);
             renderCart();
-        }max-height:50vh"><table id="cartTable"></table></div>
-                        <div class="tot-box">
-                            <span class="tot-label">Amount Payable</span>
-                            <div class="tot-val" id="total">₹0.00</div>
-                        </div>
-                        <div class="row">
-                            <button class="b" id="go" style="flex:2;font-size:16px">GENERATE BILL (F2)</button>
-                            <button class="g" id="clr" style="flex:1">Clear</button>
-                        </div>
-                        <div class="row">
-                            <button class="g" id="rp" style="width:100%">Print Last Bill${lastBill ? ' (#' + lastBill.no + ')' : ''}</button>
-                        </div>
-                        <div id="err" class="warn" style="margin-top:10px;text-align:center;font-weight:500"></div>
-                    </div>
-                </div>`;
-
-            const sid = $('#sid'), sname = $('#sname');
-            if (sid) sid.oninput = () => cart.sid = sid.value.trim();
-            if (sname) sname.oninput = () => cart.sname = sname.value;
-
-            if (sid) sid.onkeydown = async e => {
-                if (e.key !== 'Enter') return;
-                cart.sid = sid.value.trim();
-                if (cart.sid) {
-                    const sDoc = await getDoc(doc(db, 'students', cart.sid));
-                    if (sDoc.exists()) {
-                        sname.value = sDoc.data().name;
-                        cart.sname = sDoc.data().name;
-                    }
-                }
-                $('#q').focus();
-            };
-
-            const qInput = $('#q');
-            if (qInput) {
-                qInput.oninput = () => {
-                    chips();
-                };
-                qInput.onkeydown = e => {
-                    if (e.key !== 'Enter') return;
-                    const v = e.target.value.trim();
-                    if (!v) return;
-                    const it = items.find(i => i.code === v);
-                    if (it) { addCart(it.id); qInput.value = ''; }
-                };
-            }
-
-            $('#clr').onclick = () => { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); };
-            $('#go').onclick = generateBill;
-            $('#rp').onclick = () => { if (lastBill) printBill(lastBill); else say('No bill to print'); };
-
-            const handleF2 = e => { if (e.key === 'F2') generateBill(); };
-            window.addEventListener('keydown', handleF2);
-            window._currentTabHandler = handleF2;
-
-            renderCart();
         }
-
-        function chips() {
-            const q = $('#q').value.toLowerCase();
-            const container = $('#chips');
-            if (!container) return;
-            if (!q) { container.innerHTML = ''; return; }
-            const matches = items.filter(i => i.name.toLowerCase().includes(q) || (i.code && i.code.toLowerCase().includes(q)));
-
-            container.innerHTML = matches.map(i => `
-                <div class="chip" data-id="${i.id}">
-                    <b>${esc(i.name)}</b>
-                    <small>${inr(i.price)} | ${i.type}</small>
-                    <div class="stock-badge">Stock: ${i.stock}</div>
-                </div>
-            `).join('');
-
-            // Attach listeners to chips after rendering
-            container.querySelectorAll('.chip').forEach(chip => {
-                chip.onclick = () => addCart(chip.dataset.id);
-            });
-        }
-
-        function addCart(id) {
-            const it = item(id);
-            if (!it) return;
-            const existing = cart.items.find(i => i.id == id);
-            if (existing) {
-                existing.qty++;
-            } else {
-                cart.items.push({ id: it.id, name: it.name, price: it.price, qty: 1 });
-            }
-            renderCart();
-            if (tab === 'bill') {
-                const q = $('#q');
-                if (q) q.value = '';
-            }
-        }
-
-        function renderCart() {
-            const table = $('#cartTable');
-            if (!table) return;
-            if (cart.items.length === 0) {
-                table.innerHTML = '<tr><td class="mut" style="text-align:center">Cart is empty</td></tr>';
-                $('#total').textContent = '₹0.00';
-                return;
-            }
-            let total = 0;
-            table.innerHTML = `<thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Sub</th><th></th></tr></thead>
-                <tbody>` + cart.items.map((i, idx) => {
-                    const sub = i.qty * i.price;
-                    total += sub;
-                    return `<tr>
-                        <td>${esc(i.name)}</td>
-                        <td class="n"><input type="number" min="1" value="${i.qty}" data-idx="${idx}" class="qty-input" style="width:50px; text-align:right; padding:2px"></td>
-                        <td class="n">${inr(i.price)}</td>
-                        <td class="n">${inr(sub)}</td>
-                        <td><button class="g rem-btn" data-idx="${idx}" style="padding:2px 6px">×</button></td>
-                    </tr>`;
-                }).join('') + `</tbody>`;
-            $('#total').textContent = inr(total);
-
-            // Attach listeners to cart inputs and delete buttons
-            document.querySelectorAll('.qty-input').forEach(input => {
-                input.onchange = (e) => updateQty(e.target.dataset.idx, e.target.value);
-            });
-            document.querySelectorAll('.rem-btn').forEach(btn => {
-                btn.onclick = () => remCart(btn.dataset.idx);
-            });
-        }
-
-        function updateQty(idx, val) {
-            const qty = parseInt(val);
-            if (isNaN(qty) || qty < 1) return say('Quantity must be at least 1');
-            cart.items[idx].qty = qty;
-            renderCart();
-        }
-
-        function remCart(idx) {
-            cart.items.splice(idx, 1);
-            renderCart();
-        }
-            if (qInput) {
-                qInput.oninput = chips;
-                qInput.onkeydown = e => {
-                    if (e.key !== 'Enter') return;
-                    const v = e.target.value.trim();
-                    if (!v) return;
-                    const it = items.find(i => i.code === v);
-                    if (it) { addCart(it.id); qInput.value = ''; }
-                };
-            }
-
-            $('#clr').onclick = () => { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); };
-            $('#go').onclick = generateBill;
-            $('#rp').onclick = () => { if (lastBill) printBill(lastBill); else say('No bill to print'); };
-
-            const handleF2 = e => { if (e.key === 'F2') generateBill(); };
-            window.addEventListener('keydown', handleF2);
-            window._currentTabHandler = handleF2;
-
-            renderCart();
-        }
-
-        function chips() {
-            const q = $('#q').value.toLowerCase();
-            const container = $('#chips');
-            if (!container) return;
-            if (!q) { container.innerHTML = ''; return; }
-            const matches = items.filter(i => i.name.toLowerCase().includes(q) || (i.code && i.code.toLowerCase().includes(q)));
-            container.innerHTML = matches.map(i => `
-                <div class="chip" onclick="addCart(${i.id})">
-                    <b>${esc(i.name)}</b>
-                    <small>${inr(i.price)} | ${i.type}</small>
-                    <div class="stock-badge">Stock: ${i.stock}</div>
-                </div>
-            `).join('');
-        }
-
-        window.addCart = id => {
-            const it = item(id);
-            if (!it) return;
-            const existing = cart.items.find(i => i.id == id);
-            if (existing) {
-                existing.qty++;
-            } else {
-                cart.items.push({ id: it.id, name: it.name, price: it.price, qty: 1 });
-            }
-            renderCart();
-            if (tab === 'bill') $('#q').value = '';
-        };
-
-        function renderCart() {
-            const table = $('#cartTable');
-            if (!table) return;
-            if (cart.items.length === 0) {
-                table.innerHTML = '<tr><td class="mut" style="text-align:center">Cart is empty</td></tr>';
-                $('#total').textContent = '₹0.00';
-                return;
-            }
-            let total = 0;
-            table.innerHTML = `<thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Sub</th><th></th></tr></thead>
-                <tbody>` + cart.items.map((i, idx) => {
-                    const sub = i.qty * i.price;
-                    total += sub;
-                    return `<tr>
-                        <td>${esc(i.name)}</td>
-                        <td class="n"><input type="number" min="1" value="${i.qty}" onchange="updateQty(${idx}, this.value)" style="width:50px; text-align:right; padding:2px"></td>
-                        <td class="n">${inr(i.price)}</td>
-                        <td class="n">${inr(sub)}</td>
-                        <td><button class="g" onclick="remCart(${idx})" style="padding:2px 6px">×</button></td>
-                    </tr>`;
-                }).join('') + `</tbody>`;
-            $('#total').textContent = inr(total);
-        }
-
-        window.updateQty = (idx, val) => {
-            const qty = parseInt(val);
-            if (isNaN(qty) || qty < 1) return say('Quantity must be at least 1');
-            cart.items[idx].qty = qty;
-            renderCart();
-        };
-
-        window.remCart = idx => {
-            cart.items.splice(idx, 1);
-            renderCart();
-        };
 
         async function generateBill() {
             if (cart.items.length === 0) return say('Cart is empty');
@@ -588,7 +359,6 @@
                         throw new Error(`Insufficient raw paper stock (${rawDoc.data().stock}/${totalRawNeeded})`);
                     }
 
-                    // Deduct stock
                     for (let ci of cart.items) {
                         const itRef = doc(db, 'items', ci.id.toString());
                         const itData = (await transaction.get(itRef)).data();
@@ -600,10 +370,9 @@
                         }
                     }
 
-                    // Save bill
                     const billRef = doc(collection(db, 'bills'));
                     const billData = {
-                        no: Date.now(), // Simplified for cloud
+                        no: Date.now(),
                         date: new Date().toISOString(),
                         sid: cart.sid,
                         sname: cart.sname,
@@ -613,7 +382,6 @@
                     };
                     transaction.set(billRef, billData);
 
-                    // Upsert Student
                     if (cart.sid) {
                         transaction.set(doc(db, 'students', cart.sid), { name: cart.sname }, { merge: true });
                     }
@@ -723,6 +491,7 @@
                 await setDoc(itRef, { stock: Math.max(0, currentStock + amt) }, { merge: true });
                 await addDoc(collection(db, 'stockLogs'), { itemId: id, delta: amt, user: 'Admin', date: new Date().toISOString() });
                 say('Stock updated!');
+                rStock();
             } catch (e) { say(e.message); }
         };
 
@@ -811,19 +580,16 @@
             }
         }
 
-        // Helper for fetching collections
         async function getFirestoreQuery(colName) {
             const snap = await getDocs(collection(db, colName));
             return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
-        /* --- STUDENT HISTORY --- */
         async function rHistory() {
             const prn = currentUser.prn;
             if (!prn) return $('#main').innerHTML = `<div class="card"><h2>History</h2><p>No PRN associated with your account.</p></div>`;
 
             const q = query(collection(db, 'bills'), where('sid', '==', prn));
-            // ... fetch and render bills
             $('#main').innerHTML = `<div class="card"><h2>My Purchase History</h2><p>Fetching records for PRN: ${prn}...</p></div>`;
         }
 
