@@ -151,9 +151,9 @@
 
         function setupNav() {
             const nav = $('#main-nav');
-            const roles = { owner: ['bill', 'stock', 'rep'], staff: ['bill', 'stock'], student: ['history'] };
+            const roles = { owner: ['bill', 'stock', 'rep', 'lookup'], staff: ['bill', 'stock', 'lookup'], student: ['history'] };
             const myTabs = roles[userRole] || [];
-            const labels = { bill: 'Billing', stock: 'Stock', rep: 'Reports', history: 'My History' };
+            const labels = { bill: 'Billing', stock: 'Stock', rep: 'Reports', history: 'My History', lookup: 'Student Portal' };
 
             nav.innerHTML = myTabs.map(t => `<button data-t="${t}" class="${t === myTabs[0] ? 'on' : ''}">${labels[t]}</button>`).join('');
             nav.onclick = e => {
@@ -173,7 +173,7 @@
         }
 
         function render() {
-            const screens = { bill: rBill, stock: rStock, rep: rRep, history: rHistory };
+            const screens = { bill: rBill, stock: rStock, rep: rRep, history: rHistory, lookup: rLookup };
             if (screens[tab]) screens[tab]();
         }
 
@@ -183,26 +183,27 @@
         $('#main').onclick = async (e) => {
             const target = e.target;
 
-            // Product Chips
             const chip = target.closest('.chip');
             if (chip) {
                 addCart(chip.dataset.id);
                 return;
             }
 
-            // Billing Buttons
             if (target.id === 'go') { await generateBill(); return; }
             if (target.id === 'clr') { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); return; }
             if (target.id === 'rp') { if (lastBill) printBill(lastBill); else say('No bill to print'); return; }
 
-            // History Print
             if (target.classList.contains('btn-print-hist')) {
                 const bill = JSON.parse(target.dataset.bill);
                 printBill(bill);
                 return;
             }
 
-            // Stock Buttons
+            if (target.id === 'btn-lk-search') {
+                await handleLookup();
+                return;
+            }
+
             if (target.classList.contains('adj-btn')) {
                 await adjStock(target.dataset.id, parseInt(target.dataset.amt));
                 return;
@@ -216,7 +217,6 @@
                 return;
             }
 
-            // Cart Delete
             if (target.classList.contains('rem-btn')) {
                 remCart(target.dataset.idx);
                 return;
@@ -363,10 +363,8 @@
             if (!cart.sid && !cart.sname) return say('Enter customer info');
             try {
                 await runTransaction(db, async (transaction) => {
-                    // 1. ALL READS FIRST
                     const itemDocs = [];
                     let totalRawNeeded = 0;
-
                     for (let ci of cart.items) {
                         const itDoc = await transaction.get(doc(db, 'items', ci.id.toString()));
                         if (!itDoc.exists()) throw new Error(`Item ${ci.name} not found`);
@@ -374,12 +372,10 @@
                         itemDocs.push({ ref: doc(db, 'items', ci.id.toString()), data: itData, qty: ci.qty });
                         if (itData.type === 'service') totalRawNeeded += (ci.qty * (itData.ratio || 0));
                     }
-
                     const rawRef = doc(db, 'items', '1');
                     const rawDoc = await transaction.get(rawRef);
                     const rawData = rawDoc.exists() ? rawDoc.data() : { stock: 0 };
 
-                    // 2. VALIDATION
                     if (rawData.stock < totalRawNeeded) throw new Error(`Insufficient raw paper stock`);
                     for (let item of itemDocs) {
                         if (item.data.type === 'goods' && item.data.stock < item.qty) {
@@ -387,21 +383,14 @@
                         }
                     }
 
-                    // 3. ALL WRITES LAST
                     for (let item of itemDocs) {
                         if (item.data.type === 'goods') {
                             transaction.update(item.ref, { stock: item.data.stock - item.qty });
-                        } else if (item.data.type === 'service') {
-                            // Raw stock is deducted based on total’s need, but we can apply it per-item or once.
-                            // To be safe and precise, we'll handle the raw deduction separately below.
                         }
                     }
-
-                    // Deduct total raw stock once
                     if (totalRawNeeded > 0) {
                         transaction.update(rawRef, { stock: rawData.stock - totalRawNeeded });
                     }
-
                     const billRef = doc(collection(db, 'bills'));
                     const billData = {
                         no: Date.now(), date: new Date().toISOString(),
@@ -563,19 +552,15 @@
         async function rHistory() {
             const prn = currentUser.prn;
             if (!prn) return $('#main').innerHTML = `<div class="card"><h2>History</h2><p>No PRN associated with your account.</p></div>`;
-
             $('#main').innerHTML = `<div class="card"><h2>My Purchase History</h2><p>Fetching records for PRN: ${prn}...</p></div>`;
-
             try {
                 const q = query(collection(db, 'bills'), where('sid', '==', prn));
                 const snap = await getDocs(q);
                 const bills = snap.docs.map(d => d.data()).sort((a, b) => b.no - a.no);
-
                 if (bills.length === 0) {
                     $('#main').innerHTML = `<div class="card"><h2>History</h2><p>No purchase records found for this PRN.</p></div>`;
                     return;
                 }
-
                 $('#main').innerHTML = `
                     <div class="card">
                         <h2><span style="color:var(--acc)">●</span> My Purchase History</h2>
@@ -605,6 +590,96 @@
             } catch (e) {
                 $('#main').innerHTML = `<div class="card"><h2>Error</h2><p>${e.message}</p></div>`;
             }
+        }
+
+        async function handleLookup() {
+            const prn = $('#lk-prn').value.trim();
+            const name = $('#lk-name').value.trim().toLowerCase();
+            const errEl = $('#lk-err');
+            const resEl = $('#lk-results');
+
+            if (!prn || !name) return errEl.textContent = 'Please enter both PRN and Name';
+            errEl.textContent = 'Searching...';
+            resEl.innerHTML = '';
+
+            try {
+                const sDoc = await getDoc(doc(db, 'students', prn));
+                if (!sDoc.exists() || sDoc.data().name.toLowerCase() !== name) {
+                    throw new Error('Invalid PRN or Name. Please check and try again.');
+                }
+
+                const q = query(collection(db, 'bills'), where('sid', '==', prn));
+                const snap = await getDocs(q);
+                const bills = snap.docs.map(d => d.data()).sort((a, b) => b.no - a.no);
+
+                errEl.textContent = '';
+                if (bills.length === 0) {
+                    resEl.innerHTML = `<div class="card"><p class="mut" style="text-align:center">No purchase records found.</p></div>`;
+                    return;
+                }
+
+                resEl.innerHTML = `
+                    <div class="card">
+                        <h2><span style="color:var(--acc)">●</span> Records for ${esc(sDoc.data().name)}</h2>
+                        <div class="row">
+                            <input id="lk-filter" placeholder="Filter bills by item name..." style="width:100%; margin-bottom:15px">
+                        </div>
+                        <div class="scroll">
+                            <table id="lk-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Bill #</th>
+                                        <th class="n">Total</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="lk-tbody">
+                                    ${bills.map(b => `
+                                        <tr data-bill-items='${JSON.stringify(b.items)}'>
+                                            <td>${new Date(b.date).toLocaleDateString()}</td>
+                                            <td>${b.no}</td>
+                                            <td class="n">${inr(b.total)}</td>
+                                            <td><button class="g btn-print-hist" data-bill='${JSON.stringify(b).replace(/'/g, "&apos;")}'>Print</button></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>`;
+
+                const filterInput = $('#lk-filter');
+                if (filterInput) {
+                    filterInput.oninput = () => {
+                        const term = filterInput.value.toLowerCase();
+                        const rows = document.querySelectorAll('#lk-tbody tr');
+                        rows.forEach(row => {
+                            const items = JSON.parse(row.dataset.billItems || '[]');
+                            const matches = items.some(i => i.name.toLowerCase().includes(term));
+                            row.style.display = matches ? '' : 'none';
+                        });
+                    };
+                }
+            } catch (e) {
+                errEl.textContent = e.message;
+            }
+        }
+
+        async function rLookup() {
+            $('#main').innerHTML = `
+                <div style="max-width:600px; margin:auto">
+                    <div class="card">
+                        <h2><span style="color:var(--acc)">●</span> Student Self-Service</h2>
+                        <p class="mut">Enter your PRN and Name to view your purchase history.</p>
+                        <div class="row" style="flex-direction:column; gap:15px">
+                            <input id="lk-prn" placeholder="Enter PRN (e.g. 2023CS101)" autocomplete="off">
+                            <input id="lk-name" placeholder="Enter Full Name">
+                            <button class="b" id="btn-lk-search">Search Records</button>
+                        </div>
+                        <div id="lk-err" class="warn" style="margin-top:15px; text-align:center"></div>
+                    </div>
+                    <div id="lk-results"></div>
+                </div>`;
         }
 
         function say(m) {
