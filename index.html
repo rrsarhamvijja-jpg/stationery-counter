@@ -363,25 +363,45 @@
             if (!cart.sid && !cart.sname) return say('Enter customer info');
             try {
                 await runTransaction(db, async (transaction) => {
+                    // 1. ALL READS FIRST
+                    const itemDocs = [];
                     let totalRawNeeded = 0;
+
                     for (let ci of cart.items) {
                         const itDoc = await transaction.get(doc(db, 'items', ci.id.toString()));
+                        if (!itDoc.exists()) throw new Error(`Item ${ci.name} not found`);
                         const itData = itDoc.data();
-                        if (itData.type === 'goods' && itData.stock < ci.qty) throw new Error(`Insufficient stock for ${itData.name}`);
+                        itemDocs.push({ ref: doc(db, 'items', ci.id.toString()), data: itData, qty: ci.qty });
                         if (itData.type === 'service') totalRawNeeded += (ci.qty * (itData.ratio || 0));
                     }
-                    const rawDoc = await transaction.get(doc(db, 'items', '1'));
-                    if (rawDoc.exists() && rawDoc.data().stock < totalRawNeeded) throw new Error(`Insufficient raw paper stock`);
-                    for (let ci of cart.items) {
-                        const itRef = doc(db, 'items', ci.id.toString());
-                        const itData = (await transaction.get(itRef)).data();
-                        if (itData.type === 'goods') transaction.update(itRef, { stock: itData.stock - ci.qty });
-                        if (itData.type === 'service') {
-                            const rawRef = doc(db, 'items', '1');
-                            const rawData = (await transaction.get(rawRef)).data();
-                            transaction.update(rawRef, { stock: rawData.stock - (ci.qty * (itData.ratio || 0)) });
+
+                    const rawRef = doc(db, 'items', '1');
+                    const rawDoc = await transaction.get(rawRef);
+                    const rawData = rawDoc.exists() ? rawDoc.data() : { stock: 0 };
+
+                    // 2. VALIDATION
+                    if (rawData.stock < totalRawNeeded) throw new Error(`Insufficient raw paper stock`);
+                    for (let item of itemDocs) {
+                        if (item.data.type === 'goods' && item.data.stock < item.qty) {
+                            throw new Error(`Insufficient stock for ${item.data.name}`);
                         }
                     }
+
+                    // 3. ALL WRITES LAST
+                    for (let item of itemDocs) {
+                        if (item.data.type === 'goods') {
+                            transaction.update(item.ref, { stock: item.data.stock - item.qty });
+                        } else if (item.data.type === 'service') {
+                            // Raw stock is deducted based on total’s need, but we can apply it per-item or once.
+                            // To be safe and precise, we'll handle the raw deduction separately below.
+                        }
+                    }
+
+                    // Deduct total raw stock once
+                    if (totalRawNeeded > 0) {
+                        transaction.update(rawRef, { stock: rawData.stock - totalRawNeeded });
+                    }
+
                     const billRef = doc(collection(db, 'bills'));
                     const billData = {
                         no: Date.now(), date: new Date().toISOString(),
