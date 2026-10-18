@@ -247,6 +247,110 @@
 
             const qInput = $('#q');
             if (qInput) {
+                qInput.oninput = () => {
+                    chips();
+                };
+                qInput.onkeydown = e => {
+                    if (e.key !== 'Enter') return;
+                    const v = e.target.value.trim();
+                    if (!v) return;
+                    const it = items.find(i => i.code === v);
+                    if (it) { addCart(it.id); qInput.value = ''; }
+                };
+            }
+
+            $('#clr').onclick = () => { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); };
+            $('#go').onclick = generateBill;
+            $('#rp').onclick = () => { if (lastBill) printBill(lastBill); else say('No bill to print'); };
+
+            const handleF2 = e => { if (e.key === 'F2') generateBill(); };
+            window.addEventListener('keydown', handleF2);
+            window._currentTabHandler = handleF2;
+
+            renderCart();
+        }
+
+        function chips() {
+            const q = $('#q').value.toLowerCase();
+            const container = $('#chips');
+            if (!container) return;
+            if (!q) { container.innerHTML = ''; return; }
+            const matches = items.filter(i => i.name.toLowerCase().includes(q) || (i.code && i.code.toLowerCase().includes(q)));
+
+            container.innerHTML = matches.map(i => `
+                <div class="chip" data-id="${i.id}">
+                    <b>${esc(i.name)}</b>
+                    <small>${inr(i.price)} | ${i.type}</small>
+                    <div class="stock-badge">Stock: ${i.stock}</div>
+                </div>
+            `).join('');
+
+            // Attach listeners to chips after rendering
+            container.querySelectorAll('.chip').forEach(chip => {
+                chip.onclick = () => addCart(chip.dataset.id);
+            });
+        }
+
+        function addCart(id) {
+            const it = item(id);
+            if (!it) return;
+            const existing = cart.items.find(i => i.id == id);
+            if (existing) {
+                existing.qty++;
+            } else {
+                cart.items.push({ id: it.id, name: it.name, price: it.price, qty: 1 });
+            }
+            renderCart();
+            if (tab === 'bill') {
+                const q = $('#q');
+                if (q) q.value = '';
+            }
+        }
+
+        function renderCart() {
+            const table = $('#cartTable');
+            if (!table) return;
+            if (cart.items.length === 0) {
+                table.innerHTML = '<tr><td class="mut" style="text-align:center">Cart is empty</td></tr>';
+                $('#total').textContent = '₹0.00';
+                return;
+            }
+            let total = 0;
+            table.innerHTML = `<thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Sub</th><th></th></tr></thead>
+                <tbody>` + cart.items.map((i, idx) => {
+                    const sub = i.qty * i.price;
+                    total += sub;
+                    return `<tr>
+                        <td>${esc(i.name)}</td>
+                        <td class="n"><input type="number" min="1" value="${i.qty}" data-idx="${idx}" class="qty-input" style="width:50px; text-align:right; padding:2px"></td>
+                        <td class="n">${inr(i.price)}</td>
+                        <td class="n">${inr(sub)}</td>
+                        <td><button class="g rem-btn" data-idx="${idx}" style="padding:2px 6px">×</button></td>
+                    </tr>`;
+                }).join('') + `</tbody>`;
+            $('#total').textContent = inr(total);
+
+            // Attach listeners to cart inputs and delete buttons
+            document.querySelectorAll('.qty-input').forEach(input => {
+                input.onchange = (e) => updateQty(e.target.dataset.idx, e.target.value);
+            });
+            document.querySelectorAll('.rem-btn').forEach(btn => {
+                btn.onclick = () => remCart(btn.dataset.idx);
+            });
+        }
+
+        function updateQty(idx, val) {
+            const qty = parseInt(val);
+            if (isNaN(qty) || qty < 1) return say('Quantity must be at least 1');
+            cart.items[idx].qty = qty;
+            renderCart();
+        }
+
+        function remCart(idx) {
+            cart.items.splice(idx, 1);
+            renderCart();
+        }
+            if (qInput) {
                 qInput.oninput = chips;
                 qInput.onkeydown = e => {
                     if (e.key !== 'Enter') return;
