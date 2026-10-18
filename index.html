@@ -171,6 +171,13 @@
         }
 
         // --- DATA SYNC ---
+        // Attach global functions for HTML onclick handlers
+        window.addCart = addCart;
+        window.updateQty = updateQty;
+        window.remCart = remCart;
+        window.adjStock = adjStock;
+        window.delItem = delItem;
+
         function syncItems() {
             onSnapshot(collection(db, 'items'), (snap) => {
                 items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
