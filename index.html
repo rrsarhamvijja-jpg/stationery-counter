@@ -122,7 +122,7 @@
         let tab = 'bill';
         let lastBill = null;
 
-        // --- AUTH & GATEKEEPER ---
+        // --- AUTH ---
         $('#btn-login').onclick = async () => {
             const email = $('#login-email').value;
             const pass = $('#login-pass').value;
@@ -151,16 +151,11 @@
 
         function setupNav() {
             const nav = $('#main-nav');
-            const roles = {
-                owner: ['bill', 'stock', 'rep'],
-                staff: ['bill', 'stock'],
-                student: ['history']
-            };
+            const roles = { owner: ['bill', 'stock', 'rep'], staff: ['bill', 'stock'], student: ['history'] };
             const myTabs = roles[userRole] || [];
             const labels = { bill: 'Billing', stock: 'Stock', rep: 'Reports', history: 'My History' };
 
             nav.innerHTML = myTabs.map(t => `<button data-t="${t}" class="${t === myTabs[0] ? 'on' : ''}">${labels[t]}</button>`).join('');
-
             nav.onclick = e => {
                 const t = e.target.dataset.t;
                 if (!t) return;
@@ -170,7 +165,6 @@
             };
         }
 
-        // --- DATA SYNC ---
         function syncItems() {
             onSnapshot(collection(db, 'items'), (snap) => {
                 items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -185,7 +179,86 @@
 
         const item = id => items.find(i => i.id == id);
 
-        /* --- BILLING --- */
+        // --- GLOBAL EVENT DELEGATION ---
+        $('#main').onclick = async (e) => {
+            const target = e.target;
+
+            // Product Chips
+            const chip = target.closest('.chip');
+            if (chip) {
+                addCart(chip.dataset.id);
+                return;
+            }
+
+            // Billing Buttons
+            if (target.id === 'go') { await generateBill(); return; }
+            if (target.id === 'clr') { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); return; }
+            if (target.id === 'rp') { if (lastBill) printBill(lastBill); else say('No bill to print'); return; }
+
+            // History Print
+            if (target.classList.contains('btn-print-hist')) {
+                const bill = JSON.parse(target.dataset.bill);
+                printBill(bill);
+                return;
+            }
+
+            // Stock Buttons
+            if (target.classList.contains('adj-btn')) {
+                await adjStock(target.dataset.id, parseInt(target.dataset.amt));
+                return;
+            }
+            if (target.classList.contains('del-btn')) {
+                await delItem(target.dataset.id);
+                return;
+            }
+            if (target.id === 'add-item') {
+                await addNewItem();
+                return;
+            }
+
+            // Cart Delete
+            if (target.classList.contains('rem-btn')) {
+                remCart(target.dataset.idx);
+                return;
+            }
+        };
+
+        $('#main').oninput = (e) => {
+            const id = e.target.id;
+            if (id === 'sid') cart.sid = e.target.value.trim();
+            if (id === 'sname') cart.sname = e.target.value;
+            if (id === 'q') chips();
+            if (e.target.classList.contains('qty-input')) {
+                updateQty(e.target.dataset.idx, e.target.value);
+            }
+        };
+
+        $('#main').onkeydown = async (e) => {
+            if (tab !== 'bill') return;
+            if (e.key === 'Enter' && e.target.id === 'sid') {
+                cart.sid = e.target.value.trim();
+                if (cart.sid) {
+                    const sDoc = await getDoc(doc(db, 'students', cart.sid));
+                    if (sDoc.exists()) {
+                        const snameInput = $('#sname');
+                        if (snameInput) snameInput.value = sDoc.data().name;
+                        cart.sname = sDoc.data().name;
+                    }
+                }
+                const qInput = $('#q');
+                if (qInput) qInput.focus();
+            }
+            if (e.key === 'Enter' && e.target.id === 'q') {
+                const v = e.target.value.trim();
+                if (v) {
+                    const it = items.find(i => i.code === v);
+                    if (it) { addCart(it.id); if($('#q')) $('#q').value = ''; }
+                }
+            }
+            if (e.key === 'F2') generateBill();
+        };
+
+        /* --- BILLING VIEW --- */
         function rBill() {
             $('#main').innerHTML = `
                 <div class="grid">
@@ -220,54 +293,16 @@
                         <div id="err" class="warn" style="margin-top:10px;text-align:center;font-weight:500"></div>
                     </div>
                 </div>`;
-
-            const sid = $('#sid'), sname = $('#sname');
-            if (sid) sid.oninput = () => cart.sid = sid.value.trim();
-            if (sname) sname.oninput = () => cart.sname = sname.value;
-
-            if (sid) sid.onkeydown = async e => {
-                if (e.key !== 'Enter') return;
-                cart.sid = sid.value.trim();
-                if (cart.sid) {
-                    const sDoc = await getDoc(doc(db, 'students', cart.sid));
-                    if (sDoc.exists()) {
-                        sname.value = sDoc.data().name;
-                        cart.sname = sDoc.data().name;
-                    }
-                }
-                $('#q').focus();
-            };
-
-            const qInput = $('#q');
-            if (qInput) {
-                qInput.oninput = () => chips();
-                qInput.onkeydown = e => {
-                    if (e.key !== 'Enter') return;
-                    const v = e.target.value.trim();
-                    if (!v) return;
-                    const it = items.find(i => i.code === v);
-                    if (it) { addCart(it.id); qInput.value = ''; }
-                };
-            }
-
-            $('#clr').onclick = () => { cart.items = []; cart.sid = ''; cart.sname = ''; renderCart(); };
-            $('#go').onclick = generateBill;
-            $('#rp').onclick = () => { if (lastBill) printBill(lastBill); else say('No bill to print'); };
-
-            const handleF2 = e => { if (e.key === 'F2') generateBill(); };
-            window.addEventListener('keydown', handleF2);
-            window._currentTabHandler = handleF2;
-
+            chips();
             renderCart();
         }
 
         function chips() {
-            const q = $('#q').value.toLowerCase();
+            const q = $('#q')?.value.toLowerCase() || '';
             const container = $('#chips');
             if (!container) return;
             if (!q) { container.innerHTML = ''; return; }
             const matches = items.filter(i => i.name.toLowerCase().includes(q) || (i.code && i.code.toLowerCase().includes(q)));
-
             container.innerHTML = matches.map(i => `
                 <div class="chip" data-id="${i.id}">
                     <b>${esc(i.name)}</b>
@@ -275,26 +310,16 @@
                     <div class="stock-badge">Stock: ${i.stock}</div>
                 </div>
             `).join('');
-
-            container.querySelectorAll('.chip').forEach(chip => {
-                chip.onclick = () => addCart(chip.dataset.id);
-            });
         }
 
         function addCart(id) {
             const it = item(id);
             if (!it) return;
             const existing = cart.items.find(i => i.id == id);
-            if (existing) {
-                existing.qty++;
-            } else {
-                cart.items.push({ id: it.id, name: it.name, price: it.price, qty: 1 });
-            }
+            if (existing) existing.qty++;
+            else cart.items.push({ id: it.id, name: it.name, price: it.price, qty: 1 });
             renderCart();
-            if (tab === 'bill') {
-                const q = $('#q');
-                if (q) q.value = '';
-            }
+            if ($('#q')) $('#q').value = '';
         }
 
         function renderCart() {
@@ -319,13 +344,6 @@
                     </tr>`;
                 }).join('') + `</tbody>`;
             $('#total').textContent = inr(total);
-
-            document.querySelectorAll('.qty-input').forEach(input => {
-                input.onchange = (e) => updateQty(e.target.dataset.idx, e.target.value);
-            });
-            document.querySelectorAll('.rem-btn').forEach(btn => {
-                btn.onclick = () => remCart(btn.dataset.idx);
-            });
         }
 
         function updateQty(idx, val) {
@@ -343,7 +361,6 @@
         async function generateBill() {
             if (cart.items.length === 0) return say('Cart is empty');
             if (!cart.sid && !cart.sname) return say('Enter customer info');
-
             try {
                 await runTransaction(db, async (transaction) => {
                     let totalRawNeeded = 0;
@@ -353,12 +370,8 @@
                         if (itData.type === 'goods' && itData.stock < ci.qty) throw new Error(`Insufficient stock for ${itData.name}`);
                         if (itData.type === 'service') totalRawNeeded += (ci.qty * (itData.ratio || 0));
                     }
-
                     const rawDoc = await transaction.get(doc(db, 'items', '1'));
-                    if (rawDoc.exists() && rawDoc.data().stock < totalRawNeeded) {
-                        throw new Error(`Insufficient raw paper stock (${rawDoc.data().stock}/${totalRawNeeded})`);
-                    }
-
+                    if (rawDoc.exists() && rawDoc.data().stock < totalRawNeeded) throw new Error(`Insufficient raw paper stock`);
                     for (let ci of cart.items) {
                         const itRef = doc(db, 'items', ci.id.toString());
                         const itData = (await transaction.get(itRef)).data();
@@ -369,63 +382,40 @@
                             transaction.update(rawRef, { stock: rawData.stock - (ci.qty * (itData.ratio || 0)) });
                         }
                     }
-
                     const billRef = doc(collection(db, 'bills'));
                     const billData = {
-                        no: Date.now(),
-                        date: new Date().toISOString(),
-                        sid: cart.sid,
-                        sname: cart.sname,
-                        items: [...cart.items],
+                        no: Date.now(), date: new Date().toISOString(),
+                        sid: cart.sid, sname: cart.sname, items: [...cart.items],
                         total: cart.items.reduce((sum, i) => sum + (i.qty * i.price), 0),
                         uid: auth.currentUser.uid
                     };
                     transaction.set(billRef, billData);
-
-                    if (cart.sid) {
-                        transaction.set(doc(db, 'students', cart.sid), { name: cart.sname }, { merge: true });
-                    }
-
+                    if (cart.sid) transaction.set(doc(db, 'students', cart.sid), { name: cart.sname }, { merge: true });
                     lastBill = billData;
                 });
-
                 say('Bill generated!');
                 printBill(lastBill);
                 cart = { sid: '', sname: '', items: [] };
                 renderCart();
-            } catch (e) {
-                say(e.message);
-            }
+            } catch (e) { say(e.message); }
         }
 
         function printBill(bill) {
             const rcpt = $('#rcpt');
-            rcpt.innerHTML = `
-                <div style="border-bottom:1px dashed #000; margin-bottom:10px; padding-bottom:10px">
-                    <h2 style="margin:0; color:#000">STATIONERY PRO</h2>
-                    <small>Bill #${bill.no} | ${new Date(bill.date).toLocaleString()}</small>
+            rcpt.innerHTML = `<div style="border-bottom:1px dashed #000; margin-bottom:10px; padding-bottom:10px">
+                <h2 style="margin:0; color:#000">STATIONERY PRO</h2>
+                <small>Bill #${bill.no} | ${new Date(bill.date).toLocaleString()}</small>
                 </div>
-                <div style="text-align:left; margin-bottom:10px">
-                    <b>${esc(bill.sname || 'Guest')}</b><br>
-                    <small>ID: ${esc(bill.sid || 'N/A')}</small>
-                </div>
+                <div style="text-align:left; margin-bottom:10px"><b>${esc(bill.sname || 'Guest')}</b><br><small>ID: ${esc(bill.sid || 'N/A')}</small></div>
                 <table style="width:100%; border:none">
-                    ${bill.items.map(i => `
-                        <tr>
-                            <td style="border:none; padding:2px 0">${esc(i.name)} x ${i.qty}</td>
-                            <td style="border:none; padding:2px 0; text-align:right">${inr(i.qty * i.price)}</td>
-                        </tr>
-                    `).join('')}
+                    ${bill.items.map(i => `<tr><td style="border:none; padding:2px 0">${esc(i.name)} x ${i.qty}</td><td style="border:none; padding:2px 0; text-align:right">${inr(i.qty * i.price)}</td></tr>`).join('')}
                 </table>
-                <div style="border-top:1px dashed #000; margin-top:10px; padding-top:10px; text-align:right">
-                    <b>TOTAL: ${inr(bill.total)}</b>
-                </div>
-                <p style="margin-top:20px; font-size:11px">Thank you for visiting!</p>
-            `;
+                <div style="border-top:1px dashed #000; margin-top:10px; padding-top:10px; text-align:right"><b>TOTAL: ${inr(bill.total)}</b></div>
+                <p style="margin-top:20px; font-size:11px">Thank you for visiting!</p>`;
             window.print();
         }
 
-        /* --- STOCK --- */
+        /* --- STOCK VIEW --- */
         function rStock() {
             $('#main').innerHTML = `
                 <div class="card">
@@ -450,39 +440,33 @@
                                     <td class="n">${inr(i.price)}</td>
                                     <td class="n">
                                         ${userRole === 'owner' ? `
-                                            <button class="g" onclick="adjStock('${i.id}', -1)">-</button>
+                                            <button class="g adj-btn" data-id="${i.id}" data-amt="-1">-</button>
                                             <span style="margin:0 10px; font-weight:bold">${i.stock}</span>
-                                            <button class="g" onclick="adjStock('${i.id}', 1)">+</button>
+                                            <button class="g adj-btn" data-id="${i.id}" data-amt="1">+</button>
                                         ` : `<span style="margin:0 10px; font-weight:bold">${i.stock}</span>`}
                                     </td>
                                     <td>${i.type}</td>
-                                    <td>${userRole === 'owner' ? `<button class="g" onclick="delItem('${i.id}')" style="color:var(--bad)">Delete</button>` : ''}</td>
+                                    <td>${userRole === 'owner' ? `<button class="g del-btn" data-id="${i.id}" style="color:var(--bad)">Delete</button>` : ''}</td>
                                 </tr>
                             `).join('')}</tbody>
                         </table>
                     </div>
                 </div>`;
-
-            if (userRole === 'owner') {
-                $('#add-item').onclick = async () => {
-                    const name = $('#ni-name').value.trim();
-                    const price = parseFloat($('#ni-price').value) || 0;
-                    const type = $('#ni-type').value;
-                    if (!name) return say('Enter item name');
-                    if (price < 0) return say('Price cannot be negative');
-
-                    const newItemRef = doc(collection(db, 'items'));
-                    await setDoc(newItemRef, {
-                        name, price, stock: 0, uses: 0, ratio: 0, type,
-                        code: 'GD-' + newItemRef.id.substring(0,5).toUpperCase()
-                    });
-                    say('Item added!');
-                    rStock();
-                };
-            }
         }
 
-        window.adjStock = async (id, amt) => {
+        async function addNewItem() {
+            const name = $('#ni-name').value.trim();
+            const price = parseFloat($('#ni-price').value) || 0;
+            const type = $('#ni-type').value;
+            if (!name) return say('Enter item name');
+            if (price < 0) return say('Price cannot be negative');
+            const newItemRef = doc(collection(db, 'items'));
+            await setDoc(newItemRef, { name, price, stock: 0, uses: 0, ratio: 0, type, code: 'GD-' + newItemRef.id.substring(0,5).toUpperCase() });
+            say('Item added!');
+            rStock();
+        }
+
+        async function adjStock(id, amt) {
             if (userRole !== 'owner') return;
             try {
                 const itRef = doc(db, 'items', id);
@@ -493,65 +477,45 @@
                 say('Stock updated!');
                 rStock();
             } catch (e) { say(e.message); }
-        };
+        }
 
-        window.delItem = async (id) => {
+        async function delItem(id) {
             if (userRole !== 'owner') return;
             if (confirm('Delete this item?')) {
-                await setDoc(doc(db, 'items', id), { deleted: true }); // Soft delete for history
+                await setDoc(doc(db, 'items', id), { deleted: true });
                 say('Item marked as deleted');
                 rStock();
             }
-        };
+        }
 
-        /* --- REPORTS --- */
+        /* --- REPORTS VIEW --- */
         async function rRep() {
             $('#main').innerHTML = `<div class="card"><h2>Cloud Reports</h2><p>Loading sales data from Firestore...</p></div>`;
-
             try {
-                const billsSnap = await getFirestoreQuery('bills');
-                const bills = billsSnap.map(b => b.data());
-
+                const billsSnap = await getDocs(collection(db, 'bills'));
+                const bills = billsSnap.docs.map(d => d.data());
                 const today = new Date().toISOString().split('T')[0];
                 const totalSales = bills.reduce((sum, b) => sum + (b.total || 0), 0);
                 const todaySales = bills.filter(b => b.date && b.date.startsWith(today)).reduce((sum, b) => sum + (b.total || 0), 0);
-
                 const itemSales = {};
                 bills.forEach(b => {
-                    (b.items || []).forEach(i => {
-                        itemSales[i.name] = (itemSales[i.name] || 0) + (i.qty || 0);
-                    });
+                    (b.items || []).forEach(i => { itemSales[i.name] = (itemSales[i.name] || 0) + (i.qty || 0); });
                 });
-
                 const lowStock = items.filter(i => i.stock <= 5 && i.type !== 'service');
-
                 $('#main').innerHTML = `
                     <div class="grid">
                         <div class="card">
                             <h2><span style="color:var(--acc)">●</span> Sales Summary</h2>
-                            <div class="tot-box">
-                                <span class="tot-label">Total Revenue</span>
-                                <div class="tot-val">${inr(totalSales)}</div>
-                            </div>
-                            <div class="tot-box" style="background: #fff; border: 1px solid var(--line)">
-                                <span class="tot-label">Today's Revenue</span>
-                                <div class="tot-val" style="color: var(--ok)">${inr(todaySales)}</div>
-                            </div>
-                            <div class="row">
-                                <div class="card" style="flex:1; text-align:center">
-                                    <small>Total Bills</small>
-                                    <div style="font-size:20px; font-weight:bold">${bills.length}</div>
-                                </div>
-                            </div>
+                            <div class="tot-box"><span class="tot-label">Total Revenue</span><div class="tot-val">${inr(totalSales)}</div></div>
+                            <div class="tot-box" style="background: #fff; border: 1px solid var(--line)"><span class="tot-label">Today's Revenue</span><div class="tot-val" style="color: var(--ok)">${inr(todaySales)}</div></div>
+                            <div class="row"><div class="card" style="flex:1; text-align:center"><small>Total Bills</small><div style="font-size:20px; font-weight:bold">${bills.length}</div></div></div>
                         </div>
                         <div class="card">
                             <h2><span style="color:var(--acc)">●</span> Item Velocity</h2>
                             <div class="scroll">
                                 <table>
                                     <thead><tr><th>Item</th><th class="n">Sold Qty</th></tr></thead>
-                                    <tbody>${Object.entries(itemSales).map(([name, qty]) => `
-                                        <tr><td>${esc(name)}</td><td class="n">${qty}</td></tr>
-                                    `).join('') || '<tr><td colspan="2" class="mut">No sales yet</td></tr>'}</tbody>
+                                    <tbody>${Object.entries(itemSales).map(([name, qty]) => `<tr><td>${esc(name)}</td><td class="n">${qty}</td></tr>`).join('') || '<tr><td colspan="2" class="mut">No sales yet</td></tr>'}</tbody>
                                 </table>
                             </div>
                         </div>
@@ -562,9 +526,7 @@
                             <div class="scroll">
                                 <table>
                                     <thead><tr><th>Item</th><th class="n">Stock</th></tr></thead>
-                                    <tbody>${lowStock.map(i => `
-                                        <tr class="warn"><td>${esc(i.name)}</td><td class="n">${i.stock}</td></tr>
-                                    `).join('') || '<tr><td colspan="2" class="mut">All stock levels healthy</td></tr>'}</tbody>
+                                    <tbody>${lowStock.map(i => `<tr class="warn"><td>${esc(i.name)}</td><td class="n">${i.stock}</td></tr>`).join('') || '<tr><td colspan="2" class="mut">All stock levels healthy</td></tr>'}</tbody>
                                 </table>
                             </div>
                         </div>
@@ -575,31 +537,69 @@
                             <p>Total Transactions: ${bills.length}</p>
                         </div>
                     </div>`;
-            } catch (e) {
-                $('#main').innerHTML = `<div class="card"><h2>Error</h2><p>${e.message}</p></div>`;
-            }
-        }
-
-        async function getFirestoreQuery(colName) {
-            const snap = await getDocs(collection(db, colName));
-            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            } catch (e) { $('#main').innerHTML = `<div class="card"><h2>Error</h2><p>${e.message}</p></div>`; }
         }
 
         async function rHistory() {
             const prn = currentUser.prn;
             if (!prn) return $('#main').innerHTML = `<div class="card"><h2>History</h2><p>No PRN associated with your account.</p></div>`;
 
-            const q = query(collection(db, 'bills'), where('sid', '==', prn));
             $('#main').innerHTML = `<div class="card"><h2>My Purchase History</h2><p>Fetching records for PRN: ${prn}...</p></div>`;
+
+            try {
+                const q = query(collection(db, 'bills'), where('sid', '==', prn));
+                const snap = await getDocs(q);
+                const bills = snap.docs.map(d => d.data()).sort((a, b) => b.no - a.no);
+
+                if (bills.length === 0) {
+                    $('#main').innerHTML = `<div class="card"><h2>History</h2><p>No purchase records found for this PRN.</p></div>`;
+                    return;
+                }
+
+                $('#main').innerHTML = `
+                    <div class="card">
+                        <h2><span style="color:var(--acc)">●</span> My Purchase History</h2>
+                        <div class="scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Bill #</th>
+                                        <th class="n">Total</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${bills.map(b => `
+                                        <tr>
+                                            <td>${new Date(b.date).toLocaleDateString()}</td>
+                                            <td>${b.no}</td>
+                                            <td class="n">${inr(b.total)}</td>
+                                            <td><button class="g btn-print-hist" data-bill='${JSON.stringify(b).replace(/'/g, "&apos;")}'>Print</button></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>`;
+            } catch (e) {
+                $('#main').innerHTML = `<div class="card"><h2>Error</h2><p>${e.message}</p></div>`;
+            }
         }
 
         function say(m) {
-            const el = $('#msg');
-            if (!el) return;
-            el.textContent = m;
-            setTimeout(() => { if (el && el.textContent === m) el.textContent = ''; }, 4000);
+            let msgEl = $('#msg');
+            if (!msgEl) {
+                msgEl = document.createElement('div');
+                msgEl.id = 'msg';
+                msgEl.className = 'warn';
+                msgEl.style.cssText = 'position:fixed; bottom:20px; right:20px; padding:10px 20px; border-radius:8px; background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); z-index:1000; font-weight:600;';
+                document.body.appendChild(msgEl);
+            }
+            msgEl.textContent = m;
+            msgEl.style.display = 'block';
+            setTimeout(() => { if (msgEl && msgEl.textContent === m) msgEl.style.display = 'none'; }, 4000);
         }
-
     </script>
 </body>
 </html>
